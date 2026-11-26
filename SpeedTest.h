@@ -1,24 +1,24 @@
-// This file declares the speed analysis: reading a data file, sorting the
-// students, dividing them into passed and failed, writing both groups to
-// new files - and measuring how long every step takes.
 #ifndef SPEEDTEST_H
 #define SPEEDTEST_H
 
 #include <string>
 #include <vector>
 
+#include "FileIO.h"
 #include "Person.h"
+#include "Students.h"
+#include "Timer.h"
 
-// The sizes of the generated test files (number of students in each).
 const std::vector<int> TEST_SIZES = {1000, 10000, 100000, 1000000, 10000000};
 
-// This function returns the name of the generated file with that many students.
+const std::vector<std::string> CONTAINERS = {"vector", "list", "deque"};
+
 std::string testFileName(int studentCount);
 
-// This function creates the five test data files.
 void generateTestFiles(int homeworkCount);
 
-// This structure holds the measured times (in seconds) for one file.
+std::string outputName(const std::string& fileName, const std::string& suffix);
+
 struct Timings {
     std::size_t students = 0;
     std::size_t passed = 0;
@@ -31,14 +31,44 @@ struct Timings {
     double total = 0;
 };
 
-// This function processes one file (read, sort, split, write two files)
-// and returns the time every step took. For "data.txt" the results go to
-// "data_passed.txt" and "data_failed.txt".
-Timings splitFile(const std::string& fileName, Method method);
+template <typename Container>
+Timings splitFile(const std::string& fileName, Method method) {
+    Timings times;
+    Timer total;
+    Timer step;
 
-// This function runs splitFile() on every given file and prints a table
-// with the measured times. A file that cannot be processed is reported
-// and the test continues with the next one.
-void runSpeedTest(const std::vector<std::string>& fileNames, Method method);
+    Container students = readStudentsFromFile<Container>(fileName);
+    for (Person& student : students)
+        student.calculateFinal(method);
+    times.read = step.elapsed();
+    times.students = students.size();
+
+    step.reset();
+    sortByFinal(students);
+    times.sort = step.elapsed();
+
+    step.reset();
+    Container passed, failed;
+    splitStudents(students, passed, failed);
+    times.split = step.elapsed();
+    times.passed = passed.size();
+    times.failed = failed.size();
+
+    Container().swap(students);
+
+    step.reset();
+    writeStudentsToFile(outputName(fileName, "_passed"), passed, method);
+    times.writePassed = step.elapsed();
+
+    step.reset();
+    writeStudentsToFile(outputName(fileName, "_failed"), failed, method);
+    times.writeFailed = step.elapsed();
+
+    times.total = total.elapsed();
+    return times;
+}
+
+void runSpeedTest(const std::vector<std::string>& fileNames, Method method,
+                  const std::vector<std::string>& containers);
 
 #endif
