@@ -1,3 +1,4 @@
+// Timer: measures elapsed time in seconds for the speed analysis.
 #ifndef TIMER_H
 #define TIMER_H
 

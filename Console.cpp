@@ -11,7 +11,7 @@ int readNumber(const std::string& question, int min, int max) {
     std::string line;
     while (true) {
         std::cout << question;
-        if (!std::getline(std::cin, line))
+        if (!std::getline(std::cin, line)) // input ended (Ctrl+D)
             return min;
 
         try {

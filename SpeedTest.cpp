@@ -5,6 +5,14 @@
 #include <iostream>
 #include <list>
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#else
+#include <sys/resource.h>
+#endif
+
 #include "Errors.h"
 
 std::string testFileName(int studentCount) {
@@ -28,36 +36,66 @@ std::string outputName(const std::string& fileName, const std::string& suffix) {
     return fileName.substr(0, dot) + suffix + fileName.substr(dot);
 }
 
-static Timings splitFileWith(const std::string& container, const std::string& fileName, Method method) {
+double peakMemoryMB() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters;
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)))
+        return 0;
+    return counters.PeakWorkingSetSize / (1024.0 * 1024.0);
+#else
+    rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0)
+        return 0;
+#ifdef __APPLE__
+    return usage.ru_maxrss / (1024.0 * 1024.0); // bytes on macOS
+#else
+    return usage.ru_maxrss / 1024.0;            // kilobytes on Linux
+#endif
+#endif
+}
+
+static Timings splitFileWith(const std::string& container, const std::string& fileName,
+                             Method method, Strategy strategy, bool noLimit) {
     if (container == "list")
-        return splitFile<std::list<Person>>(fileName, method);
+        return splitFile<std::list<Person>>(fileName, method, strategy, noLimit);
     if (container == "deque")
-        return splitFile<std::deque<Person>>(fileName, method);
-    return splitFile<std::vector<Person>>(fileName, method);
+        return splitFile<std::deque<Person>>(fileName, method, strategy, noLimit);
+    return splitFile<std::vector<Person>>(fileName, method, strategy, noLimit);
 }
 
 struct Row {
-    std::string container;
     std::string fileName;
+    std::string container;
+    Strategy strategy;
     Timings times;
 };
 
 void runSpeedTest(const std::vector<std::string>& fileNames, Method method,
-                  const std::vector<std::string>& containers) {
+                  const std::vector<std::string>& containers,
+                  const std::vector<Strategy>& strategies, bool noLimit) {
     std::vector<Row> rows;
 
     for (const std::string& fileName : fileNames) {
+        bool fileFailed = false;
         for (const std::string& container : containers) {
-            std::cout << "Processing " << fileName << " with std::" << container << " ..." << std::endl;
-            try {
-                rows.push_back({container, fileName, splitFileWith(container, fileName, method)});
-            } catch (const FileError& error) {
-                std::cout << "  File error: " << error.what() << " - skipped.\n";
-                break;
-            } catch (const DataError& error) {
-                std::cout << "  Data error: " << error.what() << " - skipped.\n";
-                break;
+            for (Strategy strategy : strategies) {
+                std::cout << "Processing " << fileName << " with std::" << container << ", "
+                          << strategyTitle(strategy) << " ..." << std::endl;
+                try {
+                    rows.push_back({fileName, container, strategy,
+                                    splitFileWith(container, fileName, method, strategy, noLimit)});
+                } catch (const FileError& error) {
+                    std::cout << "  File error: " << error.what() << " - skipped.\n";
+                    fileFailed = true; // the other runs would fail on this file too
+                } catch (const DataError& error) {
+                    std::cout << "  Data error: " << error.what() << " - skipped.\n";
+                    fileFailed = true;
+                }
+                if (fileFailed)
+                    break;
             }
+            if (fileFailed)
+                break;
         }
     }
     if (rows.empty())
@@ -65,18 +103,27 @@ void runSpeedTest(const std::vector<std::string>& fileNames, Method method,
 
     std::cout << "\nTime in seconds (final grade by "
               << (method == Method::Average ? "average" : "median") << ")\n"
-              << std::left << std::setw(24) << "File" << std::setw(8) << "Type" << std::right
+              << std::left << std::setw(24) << "File" << std::setw(8) << "Type"
+              << std::setw(11) << "Strategy" << std::right
               << std::setw(10) << "Students" << std::setw(10) << "Passed" << std::setw(10) << "Failed"
-              << std::setw(9) << "Read" << std::setw(9) << "Sort" << std::setw(9) << "Split"
+              << std::setw(9) << "Read" << std::setw(9) << "Split" << std::setw(9) << "Sort"
               << std::setw(14) << "Write passed" << std::setw(14) << "Write failed"
               << std::setw(9) << "Total" << "\n"
-              << std::string(126, '-') << "\n" << std::fixed << std::setprecision(3);
+              << std::string(137, '-') << "\n" << std::fixed << std::setprecision(3);
     for (const Row& row : rows) {
         const Timings& t = row.times;
-        std::cout << std::left << std::setw(24) << row.fileName << std::setw(8) << row.container << std::right
-                  << std::setw(10) << t.students << std::setw(10) << t.passed << std::setw(10) << t.failed
-                  << std::setw(9) << t.read << std::setw(9) << t.sort << std::setw(9) << t.split
+        std::cout << std::left << std::setw(24) << row.fileName << std::setw(8) << row.container
+                  << std::setw(11) << STRATEGIES[static_cast<int>(row.strategy)] << std::right
+                  << std::setw(10) << t.students;
+        if (t.skipped) {
+            std::cout << "   skipped: erase() in a loop would take hours (use --full to force)\n";
+            continue;
+        }
+        std::cout << std::setw(10) << t.passed << std::setw(10) << t.failed
+                  << std::setw(9) << t.read << std::setw(9) << t.split << std::setw(9) << t.sort
                   << std::setw(14) << t.writePassed << std::setw(14) << t.writeFailed
                   << std::setw(9) << t.total << "\n";
     }
+    std::cout << "\nPeak memory used by this run: " << std::setprecision(1) << peakMemoryMB()
+              << " MB (run one container and one strategy at a time to compare memory)\n";
 }

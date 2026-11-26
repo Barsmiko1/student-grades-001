@@ -22,7 +22,7 @@ void generateStudentFile(const std::string& fileName, int studentCount, int home
     for (int i = 1; i <= studentCount; ++i) {
         file << std::left << std::setw(20) << ("Name" + std::to_string(i))
              << std::setw(20) << ("Surname" + std::to_string(i)) << std::right;
-        for (int j = 0; j <= homeworkCount; ++j)
+        for (int j = 0; j <= homeworkCount; ++j) // the extra number is the exam
             file << std::setw(6) << score(generator);
         file << "\n";
     }
